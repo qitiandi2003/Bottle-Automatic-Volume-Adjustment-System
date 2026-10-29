@@ -34,7 +34,7 @@ python -m pip install -e .
 ffmpeg -hide_banner -encoders | grep libx264
 ```
 
-`pip install -e .` 安装项目、依赖及命令入口，修改 `src/` 下源码后无需重新复制文件。`requirements.txt` 转交同一安装方式，旧 `requirments.txt` 也保留兼容转发；依赖以 `pyproject.toml` 为准。
+`pip install -e .` 安装项目、依赖及命令入口，修改 `src/` 下源码后无需重新复制文件。也可运行 `pip install -r requirements.txt`；依赖以 `pyproject.toml` 为准。
 
 ARM64 上请使用与 Python、系统及架构匹配的软件包，离线安装时在相同环境准备依赖。当前尚未提供经过目标硬件验证的版本锁定文件；部署验收后可保存该设备的 `pip freeze` 结果。
 
