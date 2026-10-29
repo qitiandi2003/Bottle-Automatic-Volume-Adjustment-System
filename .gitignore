@@ -1,0 +1,39 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.vscode/
+.idea/
+.cursor/
+.codex/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Runtime outputs and camera SDK logs.
+logs/
+MvSdkLog/
+save_images/
+single_images/
+debug_images/
+data/pip_pkgs/
+
+# Local device settings and credentials.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+known_hosts*
+
+# Archive transfer debris and local backups.
+/auto_volume_control/
+private_ops_backup/
+recovered_v2_git/
+*.zip
+*.whl
+*.partial
+.DS_Store
+Thumbs.db

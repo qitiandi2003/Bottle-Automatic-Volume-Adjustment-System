@@ -1,0 +1,6 @@
+# Python dependencies inherited from the verified v2 source archive.
+# Install the Hikvision MVS native SDK and ffmpeg separately.
+# Validate and freeze dependency versions on the target device.
+numpy
+opencv-python
+matplotlib
