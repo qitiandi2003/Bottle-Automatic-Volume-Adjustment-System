@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bottle-volume-control"
+version = "0.1.0"
+description = "Camera-based bottle volume adjustment and liquid-level tracking"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["numpy", "opencv-python", "matplotlib"]
+
+[project.scripts]
+bvc-run = "bottle_volume_control.app:cli"
+bvc-capture = "bottle_volume_control.camera.capture:main"
+bvc-collect = "bottle_volume_control.diagnostics.collect:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -55,7 +55,7 @@ CRC 通过说明文件与 ZIP 记录一致，不能证明打包前文件未被�
 
 已在仓库外恢复 v2 Git 备份：补入 12 个与 v1 SHA-256 完全一致的对象，并清理备份 `logs/HEAD` 的 NUL。恢复副本执行 `git fsck --full --strict` 返回 0，仅报告悬空对象，无损坏或缺失对象。原压缩包未改动。
 
-原始明细在本地审查目录的 `archive_audit.json`、`git_audit.json` 和 `source_changes.diff` 中保留，不是程序运行依赖。
+原始明细在本地工作空间的 `archives/bottle-volume-control/reports/` 中保留，包括 `archive_audit.json`、`git_audit.json`、`source_changes.diff` 与首次发布记录。原始解包位于 `archives/bottle-volume-control/sources/{v1,v2}/`，恢复 Git 备份位于 `archives/bottle-volume-control/recovery/`。这些材料不属于程序运行依赖，也不纳入公开源码包。
 
 ## 整合内容
 
@@ -69,6 +69,33 @@ CRC 通过说明文件与 ZIP 记录一致，不能证明打包前文件未被�
 
 相机修复保留 v2 的 GigE 设置和取图重试策略。快速像素转换不移除原生海康 SDK 依赖。
 
+## 包结构与工作空间整理
+
+在完成首次整合后，项目进一步改为标准 `src` 包布局。主程序、相机、算法、控制与诊断代码按职责分组，根目录只保留安装元数据、兼容启动入口、文档、脚本和测试：
+
+| 旧位置 | 当前位置 |
+| --- | --- |
+| `main.py` 业务装配 | `src/bottle_volume_control/app.py`；根 `main.py` 为兼容入口 |
+| `rt_config.py`、`rt_util.py` | `config.py`、`utils.py`（位于包内） |
+| `camera_io.py`、`auto_exposure.py`、`MvImport/` | 包内 `camera/`，SDK 封装在 `camera/sdk/` |
+| `tube.py`、`center_scale.py`、`li_det.py`、`gap_stability.py` | 包内 `vision/` |
+| `control_channel.py`、`framework/upper_link.py` | 包内 `control/` |
+| `framework/` 的状态机、阶段和循环 | 包内 `workflow/` |
+| `debug_stream.py`、`logger_utils.py`、录像和数据整理 | 包内 `diagnostics/` |
+| `docs/scripts/` 操作工具 | `scripts/` 与 `scripts/deploy/` |
+| 旧新人指南、项目全景、旧流测试入口 | `docs/legacy/` |
+| 历史联调测试和 notebook | `tests/manual/` |
+
+使用 `pip install -e .` 安装后，`bvc-run` 与 `python -m bottle_volume_control` 启动同一应用，项目根目录 `python main.py` 保留兼容行为。`bvc-capture` 和 `bvc-collect` 对应采集与已有图片整理。
+
+运行产物统一通过 `paths.py` 定位：默认是启动工作目录下的 `var/logs/` 与 `var/images/`，可用 `BVC_DATA_DIR` 指定其他数据根目录。业务运行参数的主入口为包内 `config.py`，录像保留策略仍在应用装配处设置。目录整理不调整定容阈值或上位机协议。
+
+本地维护脚本迁入 `archives/bottle-volume-control/scripts/`，按自身位置推导工作空间，并支持显式输入参数。新的复核报告写入 `reports/runs/`，拒绝覆盖已有报告；历史 JSON、ZIP 清单及差异记录保持原样。
+
+- `audit_archives.py --v1 <原ZIP> --v2 <原ZIP>` 重新检查两个归档。
+- `validate_release.py` 使用旧路径到新包结构的映射核对全部 58 项原始外层文件，并检查当前源码和文档。
+- `verify_published_release.py --archive <首次发布ZIP>` 始终对照固定提交 `f55e35e2f491ea31b869c952b6157a253a4fb9f7` 的完整文件树，避免把首次发布报告与之后的 `HEAD` 混用。
+
 ## 验证与限制
 
 本机验证环境：Python **3.12.2**、NumPy **2.5.4**、OpenCV **5.0.0.93**、Matplotlib **3.11.2**。这些版本用于本地检查，不代表目标 ARM64 设备认证，也未写为依赖锁定要求。
@@ -79,7 +106,11 @@ CRC 通过说明文件与 ZIP 记录一致，不能证明打包前文件未被�
 python -m unittest discover -s tests/unit -v
 ```
 
-本机 **28 项无硬件测试全部通过**，覆盖像素格式转换、SDK 回退 / HB 路径、HTTP 关闭时本地编码记录、会话保留与转码收尾，包括 3 项退出超时回归测试。测试使用模拟 SDK、合成帧、临时目录及模拟转码结果。历史联调脚本不属于该入口，可能连接网络、读取外部图片或真实操作相机。
+首次整合版本的 **28 项无硬件测试全部通过**，覆盖像素格式转换、SDK 回退 / HB 路径、HTTP 关闭时本地编码记录、会话保留与转码收尾，包括 3 项退出超时回归测试。
+
+本次包结构整理后的 **40 项无硬件测试通过**：20 项相机测试、4 项图像编码 / HTTP 开关测试、6 项包导入 / CLI / 数据路径测试、10 项录像测试。新增检查确保模块帮助不加载 SDK，入口及 `BVC_DATA_DIR` 路径规则保持一致。测试入口不变。
+
+测试使用模拟 SDK、合成帧、临时目录及模拟转码结果。历史联调脚本位于 `tests/manual/`，不属于该入口，可能连接网络、读取外部图片或真实操作相机。
 
 GitHub Actions 配置在推送与拉取请求时使用 Python 3.10 / 3.12 执行源码编译和无硬件测试；远程通过状态以 Actions 实际结果为准。
 

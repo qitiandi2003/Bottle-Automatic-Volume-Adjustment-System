@@ -4,10 +4,12 @@ Run: python -m unittest discover -s tests/unit -p test_camera_decode.py -v
 No camera, SDK DLL, network connection, or GUI is opened.
 """
 import ctypes
+from contextlib import redirect_stdout
 import importlib
-import importlib.util
+import io
 from pathlib import Path
 import sys
+import tempfile
 import types
 import unittest
 from unittest import mock
@@ -16,26 +18,20 @@ import cv2
 import numpy as np
 
 
-ROOT = Path(__file__).resolve().parents[2]
-
-
 def load_camera_modules():
     # The SDK's generated constants/structures are safe to import. Replace only
     # MvCameraControl_class, whose normal import would load a native DLL/.so.
-    sdk = types.ModuleType('MvCameraControl_class')
-    with mock.patch.object(sys, 'path', [str(ROOT / 'MvImport'), str(ROOT)] + sys.path):
-        for name in ('PixelType_header', 'CameraParams_header'):
-            header = importlib.import_module(name)
-            for key, value in vars(header).items():
-                if not key.startswith('_'):
-                    setattr(sdk, key, value)
-        with mock.patch.dict(sys.modules, {'MvCameraControl_class': sdk}):
-            spec = importlib.util.spec_from_file_location('camera_decode_under_test', ROOT / 'camera_io.py')
-            camera_io = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(camera_io)
-        spec = importlib.util.spec_from_file_location('camera_adapter_under_test', ROOT / 'framework' / 'camera.py')
-        adapter = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(adapter)
+    sdk_name = 'bottle_volume_control.camera.sdk.MvCameraControl_class'
+    sdk = types.ModuleType(sdk_name)
+    for name in ('PixelType_header', 'CameraParams_header'):
+        header = importlib.import_module(f'bottle_volume_control.camera.sdk.{name}')
+        for key, value in vars(header).items():
+            if not key.startswith('_'):
+                setattr(sdk, key, value)
+    adapter = importlib.import_module('bottle_volume_control.camera.device')
+    # Only the native binding is stubbed; exercise the installed package's real IO.
+    with mock.patch.dict(sys.modules, {sdk_name: sdk}):
+        camera_io = importlib.import_module('bottle_volume_control.camera.io')
     return camera_io, adapter
 
 
@@ -253,6 +249,85 @@ class CameraDecodeTests(unittest.TestCase):
         self.assertIsNone(self.decode(frame, cam))
         self.assertEqual(cam.freed, 0)
         self.assertEqual(len(cam.timeouts), 3)
+
+
+class CameraPackageTests(unittest.TestCase):
+    def test_sdk_headers_and_device_import_without_loading_native_library(self):
+        original_path = list(sys.path)
+        with mock.patch.object(ctypes.cdll, 'LoadLibrary') as load_library, \
+                mock.patch.object(ctypes, 'WinDLL', create=True) as win_dll:
+            for name in (
+                'bottle_volume_control.camera.sdk',
+                'bottle_volume_control.camera.sdk.PixelType_header',
+                'bottle_volume_control.camera.sdk.CameraParams_header',
+                'bottle_volume_control.camera.device',
+                'bottle_volume_control.camera.capture',
+            ):
+                importlib.reload(importlib.import_module(name))
+        load_library.assert_not_called()
+        win_dll.assert_not_called()
+        self.assertEqual(sys.path, original_path)
+
+    def test_capture_help_does_not_open_camera(self):
+        capture = importlib.import_module('bottle_volume_control.camera.capture')
+        output = io.StringIO()
+        with mock.patch.object(capture, 'capture_one_frame') as capture_frame, redirect_stdout(output):
+            with self.assertRaises(SystemExit) as result:
+                capture.main(['--help'])
+        self.assertEqual(result.exception.code, 0)
+        capture_frame.assert_not_called()
+        self.assertIn('var/images', output.getvalue())
+
+    def test_capture_default_output_uses_runtime_images_directory(self):
+        capture = importlib.import_module('bottle_volume_control.camera.capture')
+        with tempfile.TemporaryDirectory() as temp:
+            output_dir = Path(temp) / 'var' / 'images'
+            with mock.patch.object(capture, 'images_dir', return_value=output_dir), \
+                    mock.patch.object(capture, 'capture_one_frame', return_value=np.zeros((2, 2), dtype=np.uint8)), \
+                    mock.patch.object(capture.cv2, 'imwrite', return_value=True) as write, \
+                    redirect_stdout(io.StringIO()):
+                self.assertEqual(capture.main([]), 0)
+            self.assertEqual(Path(write.call_args.args[0]).parent, output_dir)
+
+    def test_capture_success_returns_frame_once_and_closes_camera(self):
+        capture = importlib.import_module('bottle_volume_control.camera.capture')
+        package = importlib.import_module('bottle_volume_control.camera')
+        expected = np.arange(4, dtype=np.uint8).reshape(2, 2)
+        cam = FakeCamera()
+        with mock.patch.object(package, 'io', camera_io, create=True), \
+                mock.patch.object(camera_io, 'OpenCamera', return_value=cam), \
+                mock.patch.object(camera_io, 'GrabCameraFrame', return_value=(expected, 1)), \
+                mock.patch.object(camera_io, 'CloseCamera') as close:
+            np.testing.assert_array_equal(capture.capture_one_frame(), expected)
+        self.assertEqual(cam.freed, 1)
+        close.assert_called_once_with(cam)
+
+    def test_capture_conversion_exception_returns_frame_once_and_closes_camera(self):
+        capture = importlib.import_module('bottle_volume_control.camera.capture')
+        package = importlib.import_module('bottle_volume_control.camera')
+        cam = FakeCamera()
+        with mock.patch.object(package, 'io', camera_io, create=True), \
+                mock.patch.object(camera_io, 'OpenCamera', return_value=cam), \
+                mock.patch.object(camera_io, 'GrabCameraFrame', return_value=(np.zeros((2, 2, 3), dtype=np.uint8), 3)), \
+                mock.patch.object(capture.cv2, 'cvtColor', side_effect=RuntimeError('conversion failed')), \
+                mock.patch.object(camera_io, 'CloseCamera') as close:
+            with self.assertRaisesRegex(RuntimeError, 'conversion failed'):
+                capture.capture_one_frame()
+        self.assertEqual(cam.freed, 1)
+        close.assert_called_once_with(cam)
+
+    def test_capture_failed_grab_does_not_return_an_unacquired_frame(self):
+        capture = importlib.import_module('bottle_volume_control.camera.capture')
+        package = importlib.import_module('bottle_volume_control.camera')
+        cam = FakeCamera()
+        with mock.patch.object(package, 'io', camera_io, create=True), \
+                mock.patch.object(camera_io, 'OpenCamera', return_value=cam), \
+                mock.patch.object(camera_io, 'GrabCameraFrame', return_value=None), \
+                mock.patch.object(camera_io, 'CloseCamera') as close, redirect_stdout(io.StringIO()):
+            with self.assertRaises(RuntimeError):
+                capture.capture_one_frame(max_attempts=1)
+        self.assertEqual(cam.freed, 0)
+        close.assert_called_once_with(cam)
 
 
 if __name__ == '__main__':

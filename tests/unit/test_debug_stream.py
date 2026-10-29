@@ -14,7 +14,10 @@ class DebugStreamTests(unittest.TestCase):
     def setUp(self):
         # Load an isolated copy; these tests need neither numpy/OpenCV nor sockets.
         self.cv2 = mock.Mock(IMWRITE_JPEG_QUALITY=1)
-        spec = importlib.util.spec_from_file_location("debug_stream_under_test", _ROOT / "debug_stream.py")
+        spec = importlib.util.spec_from_file_location(
+            "bottle_volume_control.diagnostics.stream_under_test",
+            _ROOT / "src" / "bottle_volume_control" / "diagnostics" / "stream.py",
+        )
         self.stream = importlib.util.module_from_spec(spec)
         with mock.patch.dict(sys.modules, {"cv2": self.cv2, "numpy": mock.Mock()}):
             spec.loader.exec_module(self.stream)

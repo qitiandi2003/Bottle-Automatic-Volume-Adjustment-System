@@ -11,7 +11,8 @@ from unittest import mock
 
 _ROOT = Path(__file__).resolve().parents[2]
 _SPEC = importlib.util.spec_from_file_location(
-    "viz_recorder_under_test", _ROOT / "framework" / "viz_recorder.py",
+    "bottle_volume_control.diagnostics.recorder_under_test",
+    _ROOT / "src" / "bottle_volume_control" / "diagnostics" / "recorder.py",
 )
 recorder_module = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(recorder_module)
